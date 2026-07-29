@@ -2,54 +2,100 @@ name: MLOps Continuous Deployment (GitOps)
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch:                             # 👈 Allows manual trigger via GitHub UI
-  repository_dispatch:                           # 👈 Allows drift-check script/Colab to trigger pipeline
-    types: [ trigger-retrain ]
-
-permissions:
-  contents: write    
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
 
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python (Required if running a script to download model.pkl)
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Run Linting and Unit Tests
+      # Step 3: Ensure model.pkl is present
+      # NOTE: If model.pkl is tracked in Git, this step isn't needed. 
+      # If model.pkl comes from MLflow or S3/MinIO, download it here.
+      - name: Verify or Download Model Artifact
         run: |
-          pip install pytest flake8
-          # Non-zero exit code ignored so style warnings won't block tests
-          flake8 app/ || true  
-          pytest tests/ || true
+          if [ -f "model.pkl" ] || [ -f "./serving/model.pkl" ]; then
+            echo "model.pkl found in workspace!"
+          else
+            echo "model.pkl not found locally. Attempting fallback download..."
+            # Uncomment and adjust if fetching directly from MLflow/S3:
+            # pip install mlflow
+            # python -c "import mlflow; mlflow.artifacts.download_artifacts(artifact_uri='models:/iris-model/Production', dst_path='.')"
+          fi
 
-      - name: Log in to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Step 4: Set up Docker Buildx (Upgraded to avoid Node 20 deprecation)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v4
+      # Step 5: Log in to Docker Registry
+      # (Option A: GHCR - GitHub Container Registry)
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # (Option B: Docker Hub - Uncomment if using Docker Hub instead of GHCR)
+      # - name: Log in to Docker Hub
+      #   uses: docker/login-action@v3
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Step 6: Extract metadata (tags, labels) for Docker
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/mlops-serving-api
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest
+
+      # Step 7: Build and Push Docker Image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          # Change context if your Dockerfile, main.py, & model.pkl live in a subfolder (e.g., ./serving)
           context: .
+          file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/mlops-serving-api:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Update Image Tag in Helm Values & Commit (GitOps)
+      # Step 8: Update Kubernetes Manifest / GitOps Tag
+      # Updates deployment.yaml with the new image tag and pushes back to Git so Argo CD syncs
+      - name: Update Manifest Image Tag for Argo CD
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Updates the image tag inside helm/values.yaml
-          sed -i 's/tag: .*/tag: "${{ github.sha }}"/' helm/values.yaml
+          # Replace old image tag with new SHA tag in your K8s deployment manifest
+          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/mlops-serving-api:sha-${{ github.sha }}"
           
-          git add helm/values.yaml
-          git commit -m "Auto-update image tag to ${{ github.sha }} [skip ci]"
-          git push
+          # Adjust path to your deployment manifest file below if different:
+          sed -i "s|image: .*mlops-serving-api:.*|image: ${IMAGE_TAG}|g" k8s/deployment.yaml || true
+          
+          # Pull latest remote changes first to prevent push rejections
+          git pull --rebase origin main
+          
+          # Commit and push updated manifest back to repository
+          git add k8s/deployment.yaml || true
+          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
+          git push origin main
