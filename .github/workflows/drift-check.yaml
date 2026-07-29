@@ -2,10 +2,9 @@ name: Drift Check & Cloud Retraining
 
 on:
   schedule:
-    - cron: "0 0 * * *" # Runs daily at midnight
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
-# Grant write permissions so GITHUB_TOKEN can dispatch workflow events
 permissions:
   contents: write
   actions: write
@@ -26,8 +25,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install mlflow boto3 pandas scikit-learn evidently requests
+        pip install "evidently==0.4.33" "mlflow<3.0.0" boto3 pandas scikit-learn requests
 
     - name: Run Cloud Training & Drift Check
       env:
