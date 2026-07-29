@@ -19,6 +19,16 @@ try:
 except (ImportError, ModuleNotFoundError):
     from evidently.metric_preset import DataDriftPreset
 
+# Helper function: Universal dictionary extractor for any Evidently version
+def extract_report_dict(report):
+    for method_name in ["as_dict", "to_dict", "dict"]:
+        if hasattr(report, method_name) and callable(getattr(report, method_name)):
+            return getattr(report, method_name)()
+    if hasattr(report, "json") and callable(getattr(report, "json")):
+        res = report.json()
+        return json.loads(res) if isinstance(res, str) else res
+    raise AttributeError("Unable to convert Evidently Report to dictionary.")
+
 # 1. Fetch File Paths
 ref_path = "data/reference_train.csv"
 prod_path = "data/production_logs.csv"
@@ -35,14 +45,16 @@ print("🔍 Calculating data drift metrics...")
 drift_report = Report(metrics=[DataDriftPreset(drift_share=0.2)])
 drift_report.run(reference_data=reference_df, current_data=current_df)
 
-# Safe dictionary extraction working across 100% of Evidently AI versions
-if hasattr(drift_report, "as_dict"):
-    report_dict = drift_report.as_dict()
-else:
-    report_dict = json.loads(drift_report.json())
+report_dict = extract_report_dict(drift_report)
 
-# Extract dataset drift boolean
-dataset_drift = report_dict["metrics"][0]["result"]["dataset_drift"]
+# Safely search for dataset_drift status in the result dictionary
+dataset_drift = False
+metrics_list = report_dict.get("metrics", [])
+for m in metrics_list:
+    result = m.get("result", {})
+    if "dataset_drift" in result:
+        dataset_drift = bool(result["dataset_drift"])
+        break
 
 # 3. Train and Upload to MLflow / MinIO if Drift Detected
 if dataset_drift:
