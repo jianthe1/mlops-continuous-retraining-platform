@@ -31,7 +31,7 @@ dataset_drift = report_dict["metrics"][0]["result"]["dataset_drift"]
 
 # 3. Train and Upload to MLflow / MinIO if Drift Detected
 if dataset_drift:
-    print("🚨 ALERT: Data drift detected! Retraining model and logging to MLflow & MinIO...")
+    print("🚨 ALERT: Data drift detected! Retraining model...")
 
     # Configure MLflow Tracking & MinIO S3
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "https://mlflow.testermy-apps.duckdns.org")
@@ -50,12 +50,35 @@ if dataset_drift:
     clf.fit(X_train, y_train)
 
     preds = clf.predict(X_test)
-    acc = accuracy_score(y_test, preds)
+    acc = float(accuracy_score(y_test, preds))
 
-    # Log to MLflow & MinIO
+    # ---------------------------------------------------------
+    # 🛡️ MLOPS GUARDRAIL CHECK
+    # ---------------------------------------------------------
+    MIN_ACCURACY_FLOOR = 0.85  # Minimum acceptable model accuracy (85%)
+
+    if acc < MIN_ACCURACY_FLOOR:
+        print(f"\n🚨 GUARDRAIL BLOCKED DEPLOYMENT!")
+        print(f"❌ Retrained model accuracy ({acc:.4f}) fell below required floor ({MIN_ACCURACY_FLOOR}).")
+        print("⛔ Aborting model registration and artifact upload to MinIO.")
+        
+        # Log failure metadata for debugging without saving model artifacts
+        with mlflow.start_run(run_name="rejected_model_guardrail"):
+            mlflow.log_metric("accuracy", acc)
+            mlflow.set_tag("guardrail_status", "REJECTED")
+            mlflow.set_tag("failure_reason", "accuracy_below_floor")
+
+        sys.exit(1)  # Stop workflow & trigger alert in GitHub Actions
+
+    # ---------------------------------------------------------
+    # Log to MLflow & MinIO if Guardrail Passed
+    # ---------------------------------------------------------
+    print(f"✅ Model passed quality guardrails! Accuracy: {acc:.4f}")
+
     with mlflow.start_run(run_name="retrained_model_drift_trigger"):
         mlflow.log_metric("accuracy", acc)
         mlflow.log_param("drift_detected", True)
+        mlflow.set_tag("guardrail_status", "PASSED")
         
         # Log and Register Model
         mlflow.sklearn.log_model(
@@ -63,7 +86,7 @@ if dataset_drift:
             artifact_path="model",
             registered_model_name="iris-model"
         )
-        print(f"✅ Model retrained and uploaded to MLflow & MinIO! Accuracy: {acc:.4f}")
+        print("🎉 Retrained model successfully logged to MLflow & uploaded to MinIO!")
 
 else:
     print("💚 System Healthy: No significant data drift detected. Skipping retraining.")
