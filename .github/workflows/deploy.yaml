@@ -1,99 +1,83 @@
-name: MLOps Continuous Deployment (GitOps)
+name: Continuous Training and Deployment Pipeline
 
 on:
   push:
     branches:
       - main
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+      - 'helm/values.yaml'
+      - 'README.md'
+  repository_dispatch:
+    types: [trigger-retrain]
+  workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-train-deploy:
     runs-on: ubuntu-latest
 
-    steps:
-      # Step 1: Check out the repository code
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    permissions:
+      contents: write
+      packages: write
 
-      # Step 2: Set up Python (Required if running a script to download model.pkl)
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      # Step 3: Ensure model.pkl is present
-      # NOTE: If model.pkl is tracked in Git, this step isn't needed. 
-      # If model.pkl comes from MLflow or S3/MinIO, download it here.
-      - name: Verify or Download Model Artifact
+      - name: Install Dependencies
         run: |
-          if [ -f "model.pkl" ] || [ -f "./serving/model.pkl" ]; then
-            echo "model.pkl found in workspace!"
-          else
-            echo "model.pkl not found locally. Attempting fallback download..."
-            # Uncomment and adjust if fetching directly from MLflow/S3:
-            # pip install mlflow
-            # python -c "import mlflow; mlflow.artifacts.download_artifacts(artifact_uri='models:/iris-model/Production', dst_path='.')"
-          fi
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # Step 4: Set up Docker Buildx (Upgraded to avoid Node 20 deprecation)
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Run Model Retraining
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: |
+          # Executes training script if present in repo
+          if [ -f train.py ]; then python train.py; fi
 
-      # Step 5: Log in to Docker Registry
-      # (Option A: GHCR - GitHub Container Registry)
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GitHub Container Registry (GHCR)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # (Option B: Docker Hub - Uncomment if using Docker Hub instead of GHCR)
-      # - name: Log in to Docker Hub
-      #   uses: docker/login-action@v3
-      #   with:
-      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # Step 6: Extract metadata (tags, labels) for Docker
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/mlops-serving-api
-          tags: |
-            type=sha,format=long
-            type=raw,value=latest
-
-      # Step 7: Build and Push Docker Image
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .               # <--- Set context to root directory
-          file: ./Dockerfile       # <--- Dockerfile is at root
+          context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/mlops-serving-api:latest
+            ghcr.io/${{ github.repository_owner }}/mlops-serving-api:sha-${{ github.sha }}
 
-      # Step 8: Update Helm Values for Argo CD
       - name: Update Helm Image Tag for Argo CD
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 1. Update the repository and tag in helm/values.yaml
+          # 1. Update repository and tag in helm/values.yaml
           sed -i 's|repository: .*|repository: ghcr.io/${{ github.repository_owner }}/mlops-serving-api|g' helm/values.yaml
           sed -i 's|tag: .*|tag: "sha-${{ github.sha }}"|g' helm/values.yaml
           
-          # 2. Stage changes BEFORE pulling/rebasing (Fixes exit code 128)
+          # 2. Stage changes
           git add helm/values.yaml
           
-          # 3. Pull latest remote changes with autostash so rebase succeeds cleanly
+          # 3. Pull latest remote changes cleanly
           git pull --rebase --autostash origin main
           
-          # 4. Commit and push back to Git
-          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
-          git push origin main
+          # 4. Commit and push back to GitHub
+          if ! git diff-index --quiet HEAD --; then
+            git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
+            git push origin main
+          else
+            echo "No changes to commit in helm/values.yaml"
+          fi
