@@ -1,1 +1,3 @@
-tag: latest
+image:
+  repository: jianthe1/mlops-serving-api
+  tag: "latest"
