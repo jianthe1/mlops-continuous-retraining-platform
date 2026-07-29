@@ -84,14 +84,16 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Replace repository and tag in helm/values.yaml
+          # 1. Update the repository and tag in helm/values.yaml
           sed -i 's|repository: .*|repository: ghcr.io/${{ github.repository_owner }}/mlops-serving-api|g' helm/values.yaml
-          sed -i 's|tag: .*|tag: "${{ github.sha }}"|g' helm/values.yaml
+          sed -i 's|tag: .*|tag: "sha-${{ github.sha }}"|g' helm/values.yaml
           
-          # Pull latest remote changes to prevent push rejection
-          git pull --rebase origin main
-          
-          # Commit and push updated values.yaml
+          # 2. Stage changes BEFORE pulling/rebasing (Fixes exit code 128)
           git add helm/values.yaml
-          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to ${{ github.sha }} [skip ci]"
+          
+          # 3. Pull latest remote changes with autostash so rebase succeeds cleanly
+          git pull --rebase --autostash origin main
+          
+          # 4. Commit and push back to Git
+          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
           git push origin main
