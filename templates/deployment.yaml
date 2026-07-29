@@ -18,3 +18,4 @@ spec:
       containers:
       - name: fastapi
         image: ap-kulai-2.ocir.io/axvb5wrms5km/mlops-serving-api:v1
+        imagePullPolicy: Always
