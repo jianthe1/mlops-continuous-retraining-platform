@@ -7,6 +7,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
+# 0. Version-Resilient Imports for Evidently
 try:
     from evidently import Report
 except (ImportError, ModuleNotFoundError):
@@ -33,7 +34,12 @@ print("🔍 Calculating data drift metrics...")
 drift_report = Report(metrics=[DataDriftPreset(drift_share=0.2)])
 drift_report.run(reference_data=reference_df, current_data=current_df)
 
-report_dict = drift_report.as_dict()
+# Safe dictionary conversion for all Evidently versions
+if hasattr(drift_report, "to_dict"):
+    report_dict = drift_report.to_dict()
+else:
+    report_dict = drift_report.as_dict()
+
 dataset_drift = report_dict["metrics"][0]["result"]["dataset_drift"]
 
 # 3. Train and Upload to MLflow / MinIO if Drift Detected
@@ -64,7 +70,7 @@ if dataset_drift:
         mlflow.log_metric("accuracy", acc)
         mlflow.log_param("drift_detected", True)
         
-        # MLflow 2.x compatible logging
+        # Log and Register Model (Uploads .pkl binary to MinIO S3)
         mlflow.sklearn.log_model(
             sk_model=clf,
             artifact_path="model",
