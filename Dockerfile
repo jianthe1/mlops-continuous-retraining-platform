@@ -2,13 +2,20 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# COPY requirements.txt from root context
-COPY requirements.txt . 
-RUN pip install --no-cache-dir -r requirements.txt
+# Install OS-level dependencies required for building C extensions and ML libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# COPY main.py and model.pkl from app/ directory into current WORKDIR (/app)
+# Upgrade pip and install Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy main.py and model.pkl from app/ directory into container
 COPY app/main.py .
-COPY app/model.pkl .  
+COPY app/model.pkl .
 
 EXPOSE 8000
 
