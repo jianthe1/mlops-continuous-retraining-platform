@@ -78,18 +78,20 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # Step 8: Update Kubernetes Manifest / GitOps Tag
-      - name: Update Manifest Image Tag for Argo CD
+      # Step 8: Update Helm Values for Argo CD
+      - name: Update Helm Image Tag for Argo CD
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/mlops-serving-api:sha-${{ github.sha }}"
+          # Replace repository and tag in helm/values.yaml
+          sed -i 's|repository: .*|repository: ghcr.io/${{ github.repository_owner }}/mlops-serving-api|g' helm/values.yaml
+          sed -i 's|tag: .*|tag: "${{ github.sha }}"|g' helm/values.yaml
           
-          # Replace image tag in templates/deployment.yaml
-          sed -i "s|image: .*mlops-serving-api:.*|image: ${IMAGE_TAG}|g" templates/deployment.yaml || true
-          
+          # Pull latest remote changes to prevent push rejection
           git pull --rebase origin main
-          git add templates/deployment.yaml || true
-          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
+          
+          # Commit and push updated values.yaml
+          git add helm/values.yaml
+          git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to ${{ github.sha }} [skip ci]"
           git push origin main
