@@ -7,6 +7,9 @@ on:
   repository_dispatch:                           # 👈 Allows drift-check script/Colab to trigger pipeline
     types: [ trigger-retrain ]
 
+permissions:
+  contents: write    
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
