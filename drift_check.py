@@ -7,15 +7,15 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
-# 0. Version-Resilient Import for Evidently
-from evidently.report import Report
 try:
+    from evidently import Report
+except (ImportError, ModuleNotFoundError):
+    from evidently.report import Report
+
+try:
+    from evidently.presets import DataDriftPreset
+except (ImportError, ModuleNotFoundError):
     from evidently.metric_preset import DataDriftPreset
-except ModuleNotFoundError:
-    try:
-        from evidently.presets import DataDriftPreset
-    except ModuleNotFoundError:
-        from evidently.metric_preset import DataDriftPreset
 
 # 1. Fetch File Paths
 ref_path = "data/reference_train.csv"
