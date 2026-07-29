@@ -13,9 +13,8 @@ spec:
       labels:
         app: fastapi-mlops
     spec:
+      imagePullSecrets:
+      - name: ocir-secret
       containers:
       - name: fastapi
-        # CHANGE THIS LINE to match your registry full path and tag:
-        image: axvb5wrms5km/mlops-serving-api:v1
-        ports:
-        - containerPort: 8000
+        image: ap-kulai-2.ocir.io/axvb5wrms5km/mlops-serving-api:v1
