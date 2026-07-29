@@ -72,9 +72,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          # Change context if your Dockerfile, main.py, & model.pkl live in a subfolder (e.g., ./serving)
-          context: .
-          file: ./Dockerfile
+          context: ./app            # <--- Sets context to the app directory
+          file: ./Dockerfile        # Use ./app/Dockerfile if Dockerfile is also inside /app
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
