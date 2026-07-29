@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 app = FastAPI(title="MLOps Production Serving API")
 
-# This line goes HERE inside main.py
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "model.pkl")
 model = None
 
@@ -15,7 +14,7 @@ def load_model():
     try:
         if os.path.exists(MODEL_PATH):
             model = joblib.load(MODEL_PATH)
-            print("Model loaded successfully!")
+            print(f"Model loaded successfully from {MODEL_PATH}!")
         else:
             print(f"Error: {MODEL_PATH} not found.")
     except Exception as e:
@@ -36,7 +35,7 @@ def readiness_check():
 
 @app.post("/predict")
 def predict(payload: FeaturesPayload):
-    if not model:
+    if model is None:
         raise HTTPException(status_code=500, detail="Model unavailable")
     try:
         prediction = model.predict([payload.features])
