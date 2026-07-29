@@ -1,3 +1,3 @@
 image:
-  repository: ghcr.io/jianthe1/mlops-serving-api
-  tag: "sha-af7e9cfeef1bc4df79ce060890b045bf8cee126b"
+  repository: axvb5wrms5km/mlops-serving-api
+  tag: v1
