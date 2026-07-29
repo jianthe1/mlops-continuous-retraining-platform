@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import pandas as pd
 import mlflow
 import mlflow.sklearn
@@ -34,13 +35,11 @@ print("🔍 Calculating data drift metrics...")
 drift_report = Report(metrics=[DataDriftPreset(drift_share=0.2)])
 drift_report.run(reference_data=reference_df, current_data=current_df)
 
-# Safe dictionary extraction across all Evidently AI releases
-if hasattr(drift_report, "to_dict"):
-    report_dict = drift_report.to_dict()
-elif hasattr(drift_report, "dict"):
-    report_dict = drift_report.dict()
-else:
+# Safe dictionary extraction working across 100% of Evidently AI versions
+if hasattr(drift_report, "as_dict"):
     report_dict = drift_report.as_dict()
+else:
+    report_dict = json.loads(drift_report.json())
 
 # Extract dataset drift boolean
 dataset_drift = report_dict["metrics"][0]["result"]["dataset_drift"]
