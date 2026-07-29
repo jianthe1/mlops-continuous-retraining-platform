@@ -72,29 +72,24 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./app            # <--- Sets context to the app directory
-          file: ./Dockerfile        # Use ./app/Dockerfile if Dockerfile is also inside /app
+          context: .               # <--- Set context to root directory
+          file: ./Dockerfile       # <--- Dockerfile is at root
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
       # Step 8: Update Kubernetes Manifest / GitOps Tag
-      # Updates deployment.yaml with the new image tag and pushes back to Git so Argo CD syncs
       - name: Update Manifest Image Tag for Argo CD
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Replace old image tag with new SHA tag in your K8s deployment manifest
           IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/mlops-serving-api:sha-${{ github.sha }}"
           
-          # Adjust path to your deployment manifest file below if different:
-          sed -i "s|image: .*mlops-serving-api:.*|image: ${IMAGE_TAG}|g" k8s/deployment.yaml || true
+          # Replace image tag in templates/deployment.yaml
+          sed -i "s|image: .*mlops-serving-api:.*|image: ${IMAGE_TAG}|g" templates/deployment.yaml || true
           
-          # Pull latest remote changes first to prevent push rejections
           git pull --rebase origin main
-          
-          # Commit and push updated manifest back to repository
-          git add k8s/deployment.yaml || true
+          git add templates/deployment.yaml || true
           git diff-index --quiet HEAD || git commit -m "ci(deploy): update image tag to sha-${{ github.sha }} [skip ci]"
           git push origin main

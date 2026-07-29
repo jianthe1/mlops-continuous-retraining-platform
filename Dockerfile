@@ -2,12 +2,13 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# COPY requirements.txt from root context
+COPY requirements.txt . 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Ensure main.py AND model.pkl are copied into /app
-COPY main.py .
-COPY model.pkl .  
+# COPY main.py and model.pkl from app/ directory into current WORKDIR (/app)
+COPY app/main.py .
+COPY app/model.pkl .  
 
 EXPOSE 8000
 
