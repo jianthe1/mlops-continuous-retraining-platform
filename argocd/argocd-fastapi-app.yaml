@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-mlops
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/jianthe1/mlops-continuous-retraining-platform.git'
+    targetRevision: HEAD
+    path: helm                     # Points directly to your helm/ directory
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: mlops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
