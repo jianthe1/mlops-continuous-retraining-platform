@@ -2,7 +2,7 @@ import os
 import sys
 import pandas as pd
 import requests
-from evidently.metric_preset import DataDriftPreset
+from evidently.presets import DataDriftPreset
 from evidently.report import Report
 
 # 1. Fetch Environment Variables (Accepts PAT_TOKEN or GITHUB_TOKEN)
