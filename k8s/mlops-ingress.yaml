@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mlops-platform-ingress
+  namespace: mlops
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
+spec:
+  ingressClassName: traefik  # <-- THIS FIXES CLASS <none>
+  tls:
+  - hosts:
+    - mlflow.testermy-apps.duckdns.org
+    - minio.testermy-apps.duckdns.org
+    - minio-api.testermy-apps.duckdns.org
+    secretName: mlops-tls-certs
+  rules:
+  # 1. MLflow UI
+  - host: mlflow.testermy-apps.duckdns.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: mlflow-service
+            port:
+              number: 5000
+
+  # 2. MinIO Web Console UI
+  - host: minio.testermy-apps.duckdns.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-service
+            port:
+              number: 9001
+
+  # 3. MinIO S3 API Endpoint
+  - host: minio-api.testermy-apps.duckdns.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: minio-service
+            port:
+              number: 9000
