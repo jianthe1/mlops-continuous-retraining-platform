@@ -34,12 +34,15 @@ print("🔍 Calculating data drift metrics...")
 drift_report = Report(metrics=[DataDriftPreset(drift_share=0.2)])
 drift_report.run(reference_data=reference_df, current_data=current_df)
 
-# Safe dictionary conversion for all Evidently versions
+# Safe dictionary extraction across all Evidently AI releases
 if hasattr(drift_report, "to_dict"):
     report_dict = drift_report.to_dict()
+elif hasattr(drift_report, "dict"):
+    report_dict = drift_report.dict()
 else:
     report_dict = drift_report.as_dict()
 
+# Extract dataset drift boolean
 dataset_drift = report_dict["metrics"][0]["result"]["dataset_drift"]
 
 # 3. Train and Upload to MLflow / MinIO if Drift Detected
@@ -70,7 +73,7 @@ if dataset_drift:
         mlflow.log_metric("accuracy", acc)
         mlflow.log_param("drift_detected", True)
         
-        # Log and Register Model (Uploads .pkl binary to MinIO S3)
+        # Log and Register Model (Uploads .pkl binary to MinIO S3 bucket)
         mlflow.sklearn.log_model(
             sk_model=clf,
             artifact_path="model",
