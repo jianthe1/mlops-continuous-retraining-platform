@@ -64,7 +64,7 @@ if dataset_drift:
         mlflow.log_metric("accuracy", acc)
         mlflow.log_param("drift_detected", True)
         
-        # Log and Register Model (Uploads .pkl binary to MinIO S3)
+        # MLflow 2.x compatible logging
         mlflow.sklearn.log_model(
             sk_model=clf,
             artifact_path="model",
