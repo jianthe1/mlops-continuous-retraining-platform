@@ -14,8 +14,8 @@ spec:
         app: fastapi-mlops
     spec:
       containers:
-        - name: fastapi
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 8000
+      - name: fastapi
+        # CHANGE THIS LINE to match your registry full path and tag:
+        image: axvb5wrms5km/mlops-serving-api:v1
+        ports:
+        - containerPort: 8000
