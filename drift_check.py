@@ -2,8 +2,16 @@ import os
 import sys
 import pandas as pd
 import requests
-from evidently.presets import DataDriftPreset
+
+# 0. Version-Resilient Import for Evidently
 from evidently.report import Report
+try:
+    from evidently.metric_preset import DataDriftPreset
+except ModuleNotFoundError:
+    try:
+        from evidently.presets import DataDriftPreset
+    except ModuleNotFoundError:
+        from evidently.metric_preset import DataDriftPreset
 
 # 1. Fetch Environment Variables (Accepts PAT_TOKEN or GITHUB_TOKEN)
 PAT_TOKEN = os.getenv("PAT_TOKEN") or os.getenv("GITHUB_TOKEN")
