@@ -111,6 +111,86 @@ def get_warning_events(namespace: str = "default") -> List[Dict[str, str]]:
             )
     return result
 
+@mcp.tool()
+def list_nodes() -> dict:
+  """Lists all cluster nodes along with roles, OS/arch, allocatable capacity, and pressure conditions (MemoryPressure, DiskPressure, PIDPressure)."""
+  v1 = client.CoreV1Api()
+  nodes = v1.list_node().items
+  results = []
+
+  for n in nodes:
+    # 1. Gather conditions (Ready, MemoryPressure, DiskPressure, PIDPressure)
+    conditions = {c.type: c.status for c in (n.status.conditions or [])}
+
+    # 2. Extract roles from labels
+    roles = [
+        k.split("/")[-1]
+        for k in (n.metadata.labels or {}).keys()
+        if "node-role.kubernetes.io" in k
+    ]
+    if not roles:
+      roles = ["worker"]
+
+    results.append({
+        "name": n.metadata.name,
+        "roles": roles,
+        "kubelet_version": n.status.node_info.kubelet_version,
+        "os": n.status.node_info.os_image,
+        "architecture": n.status.node_info.architecture,
+        "container_runtime": n.status.node_info.container_runtime_version,
+        "conditions": conditions,  # e.g., {'Ready': 'True', 'MemoryPressure': 'False', ...}
+        "capacity": {
+            "cpu": n.status.capacity.get("cpu"),
+            "memory": n.status.capacity.get("memory"),
+            "pods": n.status.capacity.get("pods"),
+        },
+        "allocatable": {
+            "cpu": n.status.allocatable.get("cpu"),
+            "memory": n.status.allocatable.get("memory"),
+        },
+    })
+
+  return {"nodes": results}
+
+@mcp.tool()
+def list_deployments(namespace: str = "default") -> dict:
+  """Lists deployments with replica statuses (desired, updated, ready, available)."""
+  apps_v1 = client.AppsV1Api()
+  deps = apps_v1.list_namespaced_deployment(namespace=namespace).items
+  return {
+      "deployments": [{
+          "name": d.metadata.name,
+          "replicas_desired": d.spec.replicas,
+          "replicas_ready": d.status.ready_replicas or 0,
+          "replicas_updated": d.status.updated_replicas or 0,
+          "replicas_available": d.status.available_replicas or 0,
+          "images": [c.image for c in d.spec.template.spec.containers],
+      } for d in deps]
+  }
+
+
+@mcp.tool()
+def get_resource_events(namespace: str = "default", limit: int = 15) -> dict:
+  """Fetches recent events in a namespace with timestamps, reasons, and target objects."""
+  v1 = client.CoreV1Api()
+  events = v1.list_namespaced_event(namespace=namespace).items
+  events_sorted = sorted(
+      events,
+      key=lambda e: e.last_timestamp or e.event_time or "",
+      reverse=True,
+  )[:limit]
+
+  return {
+      "events": [{
+          "type": e.type,
+          "reason": e.reason,
+          "object": f"{e.involved_object.kind}/{e.involved_object.name}",
+          "message": e.message,
+          "count": e.count,
+          "last_seen": str(e.last_timestamp),
+      } for e in events_sorted]
+  }
+
 
 if __name__ == "__main__":
     # Runs an SSE server listening on port 8000
