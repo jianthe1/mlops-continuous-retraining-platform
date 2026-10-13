@@ -1,107 +1,109 @@
 import os
-# Sanitize stale SSL environment variables
-if "SSL_CERT_FILE" in os.environ and not os.path.exists(os.environ["SSL_CERT_FILE"]):
-    del os.environ["SSL_CERT_FILE"]
-if "SSL_CERT_DIR" in os.environ and not os.path.exists(os.environ["SSL_CERT_DIR"]):
-    del os.environ["SSL_CERT_DIR"]
+from fastmcp import FastMCP
+from kubernetes import client, config
 
-import asyncio
-import json
-import sys
-from fastmcp import Client
-from google import genai
-from google.genai import types
+mcp = FastMCP("Kubernetes Cluster Inspector")
 
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/sse")
+# Use in-cluster config when running inside K8s, fallback to kubeconfig locally
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
 
-def clean_schema_for_gemini(schema):
-    """Recursively removes OpenAPI attributes unsupported by the Gemini API."""
-    if isinstance(schema, dict):
-        banned = {"additional_properties", "additionalProperties", "$schema", "title"}
-        return {k: clean_schema_for_gemini(v) for k, v in schema.items() if k not in banned}
-    elif isinstance(schema, list):
-        return [clean_schema_for_gemini(item) for item in schema]
-    return schema
 
-async def run_interactive_agent():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("ERROR: GEMINI_API_KEY environment variable is not set.")
-        sys.exit(1)
+@mcp.tool()
+def list_nodes() -> dict:
+    """Lists all cluster nodes with roles, architecture, OS, capacity, allocatable headroom, and pressure flags."""
+    v1 = client.CoreV1Api()
+    nodes = v1.list_node().items
+    results = []
 
-    gemini_client = genai.Client(api_key=api_key)
+    for n in nodes:
+        # Conditions map (Ready, MemoryPressure, DiskPressure, PIDPressure)
+        conditions = {c.type: c.status for c in (n.status.conditions or [])}
 
-    print(f"Connecting to MCP Server at: {MCP_SERVER_URL} ...")
-    async with Client(MCP_SERVER_URL) as mcp_client:
-        mcp_tools = await mcp_client.list_tools()
-        print(f"Discovered {len(mcp_tools)} tools from MCP server.")
+        # Roles extraction
+        roles = [
+            k.split("/")[-1]
+            for k in (n.metadata.labels or {}).keys()
+            if "node-role.kubernetes.io" in k
+        ]
+        if not roles:
+            roles = ["control-plane", "master"] if "k3s" in n.metadata.name else ["worker"]
 
-        func_declarations = []
-        for t in mcp_tools:
-            raw_schema = getattr(t, "input_schema", {})
-            func_declarations.append(
-                types.FunctionDeclaration(
-                    name=t.name,
-                    description=t.description or "",
-                    parameters=clean_schema_for_gemini(raw_schema),
-                )
-            )
+        results.append({
+            "name": n.metadata.name,
+            "roles": roles,
+            "kubelet_version": n.status.node_info.kubelet_version,
+            "os_image": n.status.node_info.os_image,
+            "architecture": n.status.node_info.architecture,
+            "kernel_version": n.status.node_info.kernel_version,
+            "container_runtime": n.status.node_info.container_runtime_version,
+            "conditions": conditions,
+            "capacity": {
+                "cpu": n.status.capacity.get("cpu"),
+                "memory": n.status.capacity.get("memory"),
+                "pods": n.status.capacity.get("pods"),
+            },
+            "allocatable": {
+                "cpu": n.status.allocatable.get("cpu"),
+                "memory": n.status.allocatable.get("memory"),
+                "ephemeral_storage": n.status.allocatable.get("ephemeral-storage"),
+            },
+        })
 
-        gemini_tools = [types.Tool(function_declarations=func_declarations)]
+    return {"nodes": results}
 
-        system_instruction = (
-            "You are a Senior Kubernetes Platform and SRE Engineer.\n"
-            "Diagnostic Rules:\n"
-            "1. Correlate all warning events with the live pod list from `list_pods`.\n"
-            "2. If a warning belongs to a pod that is no longer listed, treat it as a past artifact from a completed deployment, NOT an active failure.\n"
-            "3. If a running pod has 0 restarts, a single past readiness probe warning was a transient startup delay, not an active outage.\n"
-            "4. Clearly separate ACTIVE issues from HISTORICAL artifacts in your diagnostic summary."
-        )
 
-        chat = gemini_client.chats.create(
-            model="gemini-2.5-flash",
-            config=types.GenerateContentConfig(
-                tools=gemini_tools,
-                system_instruction=system_instruction,
-            ),
-        )
+@mcp.tool()
+def list_pods(namespace: str = "default") -> dict:
+    """Lists pods in a namespace with container statuses, restart counts, and phase."""
+    v1 = client.CoreV1Api()
+    pods = v1.list_namespaced_pod(namespace=namespace).items
+    results = []
+    for p in pods:
+        restarts = sum(cs.restart_count for cs in (p.status.container_statuses or []))
+        ready = all(cs.ready for cs in (p.status.container_statuses or [])) if p.status.container_statuses else False
+        results.append({
+            "name": p.metadata.name,
+            "phase": p.status.phase,
+            "ready": ready,
+            "restart_count": restarts,
+            "node_name": p.spec.node_name,
+        })
+    return {"pods": results}
 
-        print("\n=== Kubernetes MCP Diagnostic Agent Ready (Type 'exit' to quit) ===\n")
-        
-        while True:
-            try:
-                user_query = input("SRE-Agent> ").strip()
-            except (KeyboardInterrupt, EOFError):
-                break
 
-            if not user_query:
-                continue
-            if user_query.lower() in ("exit", "quit"):
-                break
+@mcp.tool()
+def get_pod_logs(pod_name: str, namespace: str = "default", tail_lines: int = 100) -> dict:
+    """Fetches the most recent logs from a given pod."""
+    v1 = client.CoreV1Api()
+    try:
+        logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace, tail_lines=tail_lines)
+        return {"pod": pod_name, "logs": logs}
+    except Exception as e:
+        return {"pod": pod_name, "error": str(e)}
 
-            response = chat.send_message(user_query)
 
-            # Handle tool call loop
-            while response.function_calls:
-                for call in response.function_calls:
-                    print(f"  -> Executing: {call.name}({dict(call.args)})")
-                    mcp_result = await mcp_client.call_tool(
-                        name=call.name, arguments=dict(call.args)
-                    )
-                    raw_text = mcp_result.content[0].text if mcp_result.content else "{}"
-                    try:
-                        structured = json.loads(raw_text)
-                    except json.JSONDecodeError:
-                        structured = {"output": raw_text}
+@mcp.tool()
+def get_warning_events(namespace: str = "default") -> dict:
+    """Retrieves warning events in a namespace with timestamps, reasons, and target resources."""
+    v1 = client.CoreV1Api()
+    events = v1.list_namespaced_event(namespace=namespace).items
+    warnings = [e for e in events if e.type == "Warning"]
+    return {
+        "warnings": [
+            {
+                "reason": e.reason,
+                "message": e.message,
+                "object": f"{e.involved_object.kind}/{e.involved_object.name}",
+                "count": e.count,
+                "last_seen": str(e.last_timestamp),
+            }
+            for e in warnings
+        ]
+    }
 
-                    response = chat.send_message(
-                        types.Part.from_function_response(
-                            name=call.name,
-                            response={"result": structured},
-                        )
-                    )
-
-            print(f"\n{response.text}\n")
 
 if __name__ == "__main__":
-    asyncio.run(run_interactive_agent())
+    mcp.run(transport="sse", host="0.0.0.0", port=8000)
