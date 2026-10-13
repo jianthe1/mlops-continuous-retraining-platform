@@ -67,7 +67,7 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 8000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
