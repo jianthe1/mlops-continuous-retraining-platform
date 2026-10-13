@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-mcp-inspector
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/jianthe1/mlops-continuous-retraining-platform.git'
+    targetRevision: HEAD
+    path: k8s
+    directory:
+      include: 'mcp-deployment.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
