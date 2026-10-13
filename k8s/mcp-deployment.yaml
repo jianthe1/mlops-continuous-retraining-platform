@@ -34,6 +34,8 @@ kind: Deployment
 metadata:
   name: k8s-mcp-server
   namespace: default
+  labels:
+    app: k8s-mcp-server
 spec:
   replicas: 1
   selector:
@@ -45,11 +47,16 @@ spec:
         app: k8s-mcp-server
     spec:
       serviceAccountName: mcp-k8s-reader
+      # If your GHCR package is private, uncomment the line below:
+      # imagePullSecrets:
+      #   - name: ghcr-secret
       containers:
         - name: mcp-server
           image: ghcr.io/jianthe1/k8s-mcp-server:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
+              name: sse-port
           resources:
             requests:
               cpu: 50m
@@ -57,16 +64,30 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: k8s-mcp-service
   namespace: default
+  labels:
+    app: k8s-mcp-server
 spec:
   type: ClusterIP
   selector:
     app: k8s-mcp-server
   ports:
-    - port: 8000
+    - protocol: TCP
+      port: 8000
       targetPort: 8000
+      name: http-sse
