@@ -47,7 +47,7 @@ spec:
         app: k8s-mcp-server
     spec:
       serviceAccountName: mcp-k8s-reader
-      # If your GHCR package is private, uncomment the line below:
+      # Uncomment if your GHCR repository is Private:
       # imagePullSecrets:
       #   - name: ghcr-secret
       containers:
